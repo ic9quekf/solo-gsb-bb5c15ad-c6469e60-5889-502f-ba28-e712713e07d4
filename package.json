@@ -1,0 +1,14 @@
+{
+  "name": "turn-rule-validator",
+  "version": "1.0.0",
+  "description": "桌游回合规则验证器：BFS 探索死锁、互斥冲突与越界赋值，返回最短触发路径",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

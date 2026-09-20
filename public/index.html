@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>桌游回合规则验证器</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>桌游回合规则验证器</h1>
+    <p class="subtitle">定义有限状态变量与带条件、赋值的规则，广度优先探索死锁、互斥冲突与越界转移，返回最短触发路径</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>① 状态变量</h2>
+        <button type="button" class="btn small" id="addVarBtn">＋ 添加变量</button>
+      </div>
+      <div id="varsList"></div>
+
+      <h3>初始状态</h3>
+      <div id="initialStateForm" class="initial-grid"></div>
+
+      <div class="params">
+        <label>最大步数 maxSteps
+          <input type="number" id="maxSteps" value="12" min="0" max="100" />
+        </label>
+        <label>状态上限 maxStates
+          <input type="number" id="maxStates" value="5000" min="1" max="200000" />
+        </label>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>② 规则</h2>
+        <div class="head-actions">
+          <button type="button" class="btn small" id="addRuleBtn">＋ 添加规则</button>
+        </div>
+      </div>
+      <div id="rulesList"></div>
+    </section>
+
+    <section class="panel controls">
+      <div class="toolbar">
+        <button type="button" class="btn primary" id="runBtn">▶ 运行验证（广度优先探索）</button>
+        <button type="button" class="btn" id="loadSafePresetBtn">载入安全示例</button>
+        <button type="button" class="btn" id="loadBuggyPresetBtn">载入缺陷示例</button>
+        <button type="button" class="btn" id="exportBtn">⤓ 导出 JSON</button>
+        <button type="button" class="btn" id="importBtn">⤒ 导入 JSON</button>
+        <input type="file" id="importFile" accept="application/json,.json" hidden />
+      </div>
+    </section>
+
+    <section class="panel" id="resultPanel" hidden>
+      <div class="panel-head"><h2>③ 验证结果</h2></div>
+      <div id="verdict"></div>
+      <div id="stats" class="stats"></div>
+      <div id="findings"></div>
+    </section>
+  </main>
+
+  <footer>Node.js + Express + 原生前端 · BFS 状态空间去重探索</footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
