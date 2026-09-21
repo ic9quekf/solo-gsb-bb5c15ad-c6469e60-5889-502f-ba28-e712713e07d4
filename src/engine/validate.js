@@ -9,6 +9,8 @@ const LIMITS = {
   MAX_STATES_MAX: 200000,
   DOMAIN_MIN: -1_000_000_000,
   DOMAIN_MAX: 1_000_000_000,
+  PRIORITY_MIN: -1_000_000,
+  PRIORITY_MAX: 1_000_000,
 };
 
 const COMPARATORS = new Set(['==', '!=', '>', '>=', '<', '<=']);
@@ -168,6 +170,18 @@ export function validateInput(raw) {
         ? rule.name.trim()
         : id;
 
+      // 优先级：可选整数，缺省 0；同一状态命中多条规则时仅最高优先级参与转移
+      let priority = 0;
+      if (rule.priority !== undefined && rule.priority !== null) {
+        if (!Number.isInteger(rule.priority)) {
+          push(`${where}.priority 必须是整数`);
+        } else if (rule.priority < LIMITS.PRIORITY_MIN || rule.priority > LIMITS.PRIORITY_MAX) {
+          push(`${where}.priority 必须在 ${LIMITS.PRIORITY_MIN}..${LIMITS.PRIORITY_MAX} 之间`);
+        } else {
+          priority = rule.priority;
+        }
+      }
+
       if (!Array.isArray(rule.assignments)) {
         push(`${where}.assignments 必须是数组（无赋值请用 []）`);
       } else if (rule.assignments.length > LIMITS.ASSIGNMENTS_MAX) {
@@ -212,7 +226,7 @@ export function validateInput(raw) {
       }
       validateCondition(rule.condition ?? null, `${where}.condition`);
 
-      rules.push({ id, name, condition: rule.condition ?? null, assignments });
+      rules.push({ id, name, priority, condition: rule.condition ?? null, assignments });
     }
   }
 

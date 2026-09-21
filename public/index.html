@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>桌游回合规则验证器</h1>
-    <p class="subtitle">定义有限状态变量与带条件、赋值的规则，广度优先探索死锁、互斥冲突与越界转移，返回最短触发路径</p>
+    <p class="subtitle">定义有限状态变量与带条件、赋值的规则，广度优先探索死锁、优先级冲突与越界转移，返回最短触发路径；支持规则优先级（priority）消解冲突</p>
   </header>
 
   <main>
@@ -40,6 +40,8 @@
           <button type="button" class="btn small" id="addRuleBtn">＋ 添加规则</button>
         </div>
       </div>
+      <p class="muted">优先级策略：同一状态命中多条规则时，仅最高优先级（priority，整数，默认 0）的规则参与转移；
+        最高优先级并列仍判定为冲突，低优先级规则记为「已抑制」。</p>
       <div id="rulesList"></div>
     </section>
 

@@ -185,3 +185,114 @@ test('校验：重复的规则 ID 被拒绝', () => {
   ));
   assert.ok(errors.length > 0);
 });
+
+// ---------- 规则优先级（priority）----------
+
+test('优先级：高优先级规则抑制低优先级规则，不再报告冲突', () => {
+  const result = run(base(
+    [intVar('x', 0, 2)],
+    { x: 0 },
+    [
+      { id: 'high', name: '高优先级', priority: 10, condition: null, assignments: [assign('x', 'set', 1)] },
+      { id: 'low', name: '低优先级', priority: 1, condition: null, assignments: [assign('x', 'set', 2)] },
+    ],
+  ));
+  // 每个状态仅 high 生效：x=0 -> x=1，x=1 自环去重；low 始终被抑制
+  assert.equal(result.verdict, 'safe');
+  assert.equal(result.counts.conflict, 0);
+  assert.equal(result.stats.statesExplored, 2);
+  assert.equal(result.counts.suppressed, 2); // {x:0} 与 {x:1} 各抑制 low 一次
+});
+
+test('优先级：最高优先级并列仍报告冲突，低优先级列入 suppressed', () => {
+  const result = run(base(
+    [intVar('x', 0, 10)],
+    { x: 0 },
+    [
+      { id: 'a', name: 'A', priority: 5, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'b', name: 'B', priority: 5, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'c', name: 'C', priority: -3, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 2)] },
+    ],
+  ));
+  assert.equal(result.counts.conflict, 1);
+  const f = result.findings.conflict[0];
+  assert.equal(f.priority, 5);
+  assert.deepEqual(f.ruleIds.slice().sort(), ['a', 'b']);
+  assert.deepEqual(f.suppressed, [{ id: 'c', name: 'C', priority: -3 }]);
+  // c 被抑制不参与转移：{x:2} 不可达
+  assert.equal(result.stats.statesExplored, 2);
+  assert.equal(result.counts.suppressed, 1);
+});
+
+test('优先级：被抑制规则的越界赋值不再报告非法转移', () => {
+  const result = run(base(
+    [intVar('energy', 0, 5)],
+    { energy: 4 },
+    [
+      { id: 'normal', name: '正常消耗', priority: 1, condition: null, assignments: [assign('energy', 'set', 0)] },
+      { id: 'over', name: '过载（越界）', priority: 0, condition: null, assignments: [assign('energy', 'add', 4)] },
+    ],
+  ));
+  // over 在 energy=4 时若生效会越界（4+4>5），但被 normal 抑制
+  assert.equal(result.counts.invalidTransition, 0);
+  assert.equal(result.counts.conflict, 0);
+  assert.equal(result.verdict, 'safe');
+});
+
+test('优先级：不设置 priority 的旧规则集行为与引入优先级前一致', () => {
+  const result = run(base(
+    [intVar('energy', 0, 5)],
+    { energy: 4 },
+    [
+      { id: 'normal', name: '正常消耗', condition: null, assignments: [assign('energy', 'set', 0)] },
+      { id: 'over', name: '过载（越界）', condition: null, assignments: [assign('energy', 'add', 4)] },
+    ],
+  ));
+  // 全部规则同级（默认 0）：都生效 -> 冲突照常报告，over 越界照常检查，无抑制
+  assert.equal(result.counts.conflict, 2); // energy=4 与 energy=0 各一次
+  assert.equal(result.counts.invalidTransition, 1);
+  assert.equal(result.counts.suppressed, 0);
+});
+
+test('优先级：analyze 对缺失 priority 的规则按 0 处理（防御性）', () => {
+  const result = analyze({
+    variables: [intVar('x')],
+    initialState: { x: 0 },
+    rules: [
+      { id: 'a', name: 'A', condition: null, assignments: [assign('x', 'set', 1)] },
+      { id: 'b', name: 'B', priority: 2, condition: null, assignments: [assign('x', 'set', 2)] },
+    ],
+    maxSteps: 12,
+    maxStates: 5000,
+  });
+  assert.equal(result.counts.conflict, 0);
+  assert.equal(result.counts.suppressed, 2); // {x:0} 与 {x:2} 各抑制 a 一次
+  assert.equal(result.stats.statesExplored, 2);
+});
+
+test('校验：priority 缺省补 0，合法整数原样保留', () => {
+  const { data, errors } = validateInput(base(
+    [intVar('x')],
+    { x: 0 },
+    [
+      { id: 'a', name: 'a', condition: null, assignments: [] },
+      { id: 'b', name: 'b', priority: -7, condition: null, assignments: [] },
+    ],
+  ));
+  assert.deepEqual(errors, []);
+  assert.equal(data.rules[0].priority, 0);
+  assert.equal(data.rules[1].priority, -7);
+});
+
+test('校验：非法 priority 被拒绝', () => {
+  const mk = (priority) => base(
+    [intVar('x')],
+    { x: 0 },
+    [{ id: 'a', name: 'a', priority, condition: null, assignments: [] }],
+  );
+  for (const bad of [1.5, '2', true, NaN, 2_000_000, -2_000_000]) {
+    const { data, errors } = validateInput(mk(bad));
+    assert.ok(errors.some((e) => /priority/.test(e)), `priority=${String(bad)} 应被拒绝`);
+    assert.equal(data, null);
+  }
+});

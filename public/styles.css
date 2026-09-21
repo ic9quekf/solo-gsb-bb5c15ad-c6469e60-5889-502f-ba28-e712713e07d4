@@ -234,6 +234,7 @@ label { font-size: 13px; color: var(--muted); }
   font-size: 13px;
 }
 .finding-card .reason { color: var(--danger); margin: 4px 0; }
+.finding-card .suppressed { color: var(--warn); margin: 4px 0; }
 .path-list { margin: 6px 0 0; padding-left: 0; list-style: none; }
 .path-list li {
   font-family: ui-monospace, "SF Mono", monospace;
