@@ -5,6 +5,12 @@
 //   - 多于一条规则同时可执行        -> conflict（互斥规则同时触发）
 //   - 某条可执行规则的赋值越界      -> invalidTransition（非法转移）
 //
+// 规则优先级冲突策略（可选，priority 缺省为 0）：
+//   同一状态命中多条规则时，仅最高优先级的规则参与转移；
+//   - 最高优先级只有一条  -> 该规则单独生效，低优先级规则记入 suppressed（不算问题）；
+//   - 最高优先级并列多条  -> 仍报告 conflict，低优先级规则列入该冲突的 suppressed。
+//   旧规则集不设置 priority 时全部按 0 处理，命中即并列，行为与引入优先级前完全一致。
+//
 // 发现状态按 BFS 层级入队，因此每条记录的触发路径均为最短路径。
 // 状态使用规范化键去重；达到状态上限时 truncated=true，
 // 结果明确标记为不完备（incomplete），不会误报安全。
@@ -29,6 +35,23 @@ function matchingRules(state, rules) {
   return matches;
 }
 
+// 把命中规则按 priority 分层：effective = 最高优先级（参与转移），suppressed = 其余（被抑制）
+function resolveByPriority(matches) {
+  let maxPriority = -Infinity;
+  for (const rule of matches) {
+    if (rule.priority > maxPriority) maxPriority = rule.priority;
+  }
+  const effective = [];
+  const suppressed = [];
+  for (const rule of matches) {
+    (rule.priority === maxPriority ? effective : suppressed).push(rule);
+  }
+  return { maxPriority, effective, suppressed };
+}
+
+// finding 中规则引用的统一形态
+const ruleRef = (r) => ({ id: r.id, name: r.name, priority: r.priority });
+
 function buildPath(node) {
   const path = [];
   let current = node;
@@ -48,7 +71,7 @@ export function analyze(input) {
   const { variables, initialState, rules, maxSteps, maxStates } = input;
   const varMap = new Map(variables.map((v) => [v.name, v]));
 
-  const findings = { deadlock: [], conflict: [], invalidTransition: [] };
+  const findings = { deadlock: [], conflict: [], invalidTransition: [], suppressed: [] };
   const seen = new Set();
   const queue = [];
 
@@ -94,12 +117,29 @@ export function analyze(input) {
       continue;
     }
 
-    if (matches.length > 1) {
+    // 优先级裁决：只有最高优先级的规则参与转移
+    const { maxPriority, effective, suppressed } = resolveByPriority(matches);
+
+    if (effective.length > 1) {
+      // 最高优先级并列：互斥冲突，低优先级规则列入 suppressed
       addFinding('conflict', {
         depth: node.depth,
         state: { ...node.state },
-        ruleIds: matches.map((r) => r.id),
-        ruleNames: matches.map((r) => r.name),
+        priority: maxPriority,
+        ruleIds: effective.map((r) => r.id),
+        ruleNames: effective.map((r) => r.name),
+        effective: effective.map(ruleRef),
+        suppressed: suppressed.map(ruleRef),
+        path: buildPath(node),
+      });
+    } else if (suppressed.length > 0) {
+      // 最高优先级唯一：冲突被优先级策略解决，记录抑制明细（不算问题状态）
+      addFinding('suppressed', {
+        depth: node.depth,
+        state: { ...node.state },
+        priority: maxPriority,
+        winner: ruleRef(effective[0]),
+        suppressed: suppressed.map(ruleRef),
         path: buildPath(node),
       });
     }
@@ -112,8 +152,9 @@ export function analyze(input) {
       continue;
     }
 
-    // 即便存在冲突，仍沿每条可执行规则继续探索（每个后继独立检查合法性）
-    for (const rule of matches) {
+    // 即便存在冲突，仍沿每条生效规则继续探索（被抑制的低优先级规则不产生转移，
+    // 每个后继独立检查合法性）
+    for (const rule of effective) {
       const result = applyRule(node.state, rule, varMap);
       if (!result.ok) {
         addFinding('invalidTransition', {
@@ -151,7 +192,9 @@ export function analyze(input) {
     deadlock: findings.deadlock.length,
     conflict: findings.conflict.length,
     invalidTransition: findings.invalidTransition.length,
+    suppressed: findings.suppressed.length,
   };
+  // suppressed 是优先级策略的正常裁决结果，不算问题，不影响判定
   const hasIssue =
     counts.deadlock > 0 || counts.conflict > 0 || counts.invalidTransition > 0;
 

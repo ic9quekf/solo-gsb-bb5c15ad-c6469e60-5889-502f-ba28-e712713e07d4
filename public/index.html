@@ -40,6 +40,11 @@
           <button type="button" class="btn small" id="addRuleBtn">＋ 添加规则</button>
         </div>
       </div>
+      <p class="muted hint">
+        每条规则可设置整数 <b>优先级 priority</b>（默认 0）：同一状态命中多条规则时，仅<b>最高优先级</b>规则参与转移；
+        最高优先级<b>并列</b>多条仍判定为冲突，低优先级规则计入<b>已抑制 suppressed</b>（不视为问题）。
+        不设置优先级时所有规则按 0 处理，行为与旧版规则集一致。
+      </p>
       <div id="rulesList"></div>
     </section>
 

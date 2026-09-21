@@ -244,6 +244,8 @@ function renderRules() {
           <input class="wide" data-act="rule-input" data-idx="${i}" data-field="id" value="${esc(rule.id)}">
           <span class="muted">名称</span>
           <input class="wide" data-act="rule-input" data-idx="${i}" data-field="name" value="${esc(rule.name)}">
+          <span class="muted" title="同一状态命中多条规则时，仅最高优先级规则参与转移；最高优先级并列仍判定冲突">优先级</span>
+          <input class="narrow" type="number" step="1" data-act="rule-input" data-idx="${i}" data-field="priority" value="${esc(rule.priority ?? 0)}">
           <button type="button" class="btn small danger-text" data-act="rule-remove" data-idx="${i}">删除规则</button>
         </div>
         <div class="rule-section-title">触发条件</div>
@@ -328,7 +330,14 @@ rulesList.addEventListener('change', (e) => {
 
   if (el.dataset.act === 'rule-input') {
     const rule = model.rules[Number(el.dataset.idx)];
-    rule[el.dataset.field] = el.value;
+    const field = el.dataset.field;
+    if (field === 'priority') {
+      const n = Number(el.value);
+      rule.priority = Number.isInteger(n) ? n : 0;
+      el.value = rule.priority;
+    } else {
+      rule[field] = el.value;
+    }
     return;
   }
   if (el.dataset.act === 'assign-input') {
@@ -444,6 +453,7 @@ document.getElementById('addRuleBtn').addEventListener('click', () => {
   model.rules.push({
     id: `R${n}`,
     name: `规则 ${n}`,
+    priority: 0,
     condition: model.variables[0] ? makeLeaf() : null,
     assignments: [],
   });
@@ -471,6 +481,7 @@ function buildPayload() {
     rules: model.rules.map((r) => ({
       id: r.id,
       name: r.name,
+      priority: Number.isInteger(Number(r.priority)) ? Number(r.priority) : 0,
       condition: conditionOut(r.condition),
       assignments: r.assignments.map((a) => ({ ...a })),
     })),
@@ -522,6 +533,7 @@ function loadPayload(data) {
   model.rules = data.rules.map((r) => ({
     id: String(r.id),
     name: String(r.name ?? r.id),
+    priority: Number.isInteger(r.priority) ? r.priority : 0,
     condition: conditionIn(r.condition ?? null),
     assignments: (r.assignments ?? []).map((a) => ({
       target: String(a.target),
@@ -612,13 +624,15 @@ function renderResult(result) {
     stat(s.maxStates, '状态上限 maxStates', result.truncated ? 'warn' : '') +
     stat(s.transitions, '合法转移次数') +
     stat(result.counts.deadlock, '死锁状态（无规则可执行）', result.counts.deadlock ? 'bad' : '') +
-    stat(result.counts.conflict, '冲突状态（多规则互斥）', result.counts.conflict ? 'bad' : '') +
-    stat(result.counts.invalidTransition, '越界/非法转移', result.counts.invalidTransition ? 'bad' : '');
+    stat(result.counts.conflict, '冲突状态（最高优先级并列）', result.counts.conflict ? 'bad' : '') +
+    stat(result.counts.invalidTransition, '越界/非法转移', result.counts.invalidTransition ? 'bad' : '') +
+    stat(result.counts.suppressed, '优先级抑制状态（非问题）', '');
 
   const groups = [
     ['deadlock', '🚫 死锁：以下状态没有任何规则可执行', renderDeadlock],
-    ['conflict', '⚔️ 互斥冲突：以下状态有多个规则同时可执行', renderConflict],
+    ['conflict', '⚔️ 互斥冲突：以下状态有多条最高优先级规则并列生效', renderConflict],
     ['invalidTransition', '💥 非法转移：规则赋值结果超出变量定义域', renderInvalid],
+    ['suppressed', '🛡️ 优先级抑制：以下状态由最高优先级规则单独生效（低优先级规则被抑制，不构成问题）', renderSuppressed],
   ];
   document.getElementById('findings').innerHTML = groups
     .filter(([type]) => result.findings[type].length > 0)
@@ -647,9 +661,26 @@ function renderDeadlock(f) {
     <div><b>深度 ${f.depth}</b>：状态下没有任何规则的触发条件成立。</div>
     ${pathHtml(f)}</div>`;
 }
+// 规则引用展示：[id] 名称（优先级 n）
+const ruleRefText = (r) => `[${esc(r.id)}] ${esc(r.name)}<span class="prio-chip">优先级 ${esc(r.priority)}</span>`;
+
 function renderConflict(f) {
+  // 兼容旧结构（无 effective 字段时回退到 ruleIds/ruleNames）
+  const effective = f.effective ?? f.ruleIds.map((id, i) => ({ id, name: f.ruleNames[i], priority: f.priority }));
+  const suppressed = f.suppressed ?? [];
+  const supHtml = suppressed.length
+    ? `<div class="suppressed-line">⊘ 已抑制 ${suppressed.length} 条低优先级规则：${suppressed.map(ruleRefText).join('、')}</div>`
+    : '';
   return `<div class="finding-card">
-    <div><b>深度 ${f.depth}</b>：同时可执行的规则 —— ${f.ruleIds.map((id, i) => `[${esc(id)}] ${esc(f.ruleNames[i])}`).map(esc).join(' ／ ')}</div>
+    <div><b>深度 ${f.depth}</b>：<b>${effective.length} 条</b>最高优先级（${esc(f.priority)}）规则并列生效 ——
+      ${effective.map(ruleRefText).join(' ／ ')}</div>
+    ${supHtml}
+    ${pathHtml(f)}</div>`;
+}
+function renderSuppressed(f) {
+  return `<div class="finding-card finding-suppressed">
+    <div><b>深度 ${f.depth}</b>：${ruleRefText(f.winner)} 单独生效（最高优先级 ${esc(f.priority)}），
+      抑制 ${f.suppressed.length} 条低优先级规则 —— ${f.suppressed.map(ruleRefText).join('、')}</div>
     ${pathHtml(f)}</div>`;
 }
 function renderInvalid(f) {

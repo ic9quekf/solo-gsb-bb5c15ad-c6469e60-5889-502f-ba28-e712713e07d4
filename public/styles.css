@@ -234,6 +234,18 @@ label { font-size: 13px; color: var(--muted); }
   font-size: 13px;
 }
 .finding-card .reason { color: var(--danger); margin: 4px 0; }
+.finding-card.finding-suppressed { border-left-color: var(--warn); }
+.suppressed-line { color: var(--muted); margin: 4px 0; }
+.prio-chip {
+  display: inline-block;
+  background: rgba(168,123,255,.16);
+  color: var(--purple);
+  border-radius: 20px;
+  padding: 0 8px;
+  margin-left: 6px;
+  font-size: 11px;
+}
+.hint { margin: 0 0 12px; line-height: 1.6; }
 .path-list { margin: 6px 0 0; padding-left: 0; list-style: none; }
 .path-list li {
   font-family: ui-monospace, "SF Mono", monospace;

@@ -185,3 +185,129 @@ test('校验：重复的规则 ID 被拒绝', () => {
   ));
   assert.ok(errors.length > 0);
 });
+
+// ---------- 规则优先级冲突策略 ----------
+
+test('优先级：最高优先级规则唯一胜出时不报冲突，仅它参与转移', () => {
+  const result = run(base(
+    [intVar('x', 0, 10)],
+    { x: 0 },
+    [
+      { id: 'low', name: '低优先级', priority: 1, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'high', name: '高优先级', priority: 5, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 2)] },
+    ],
+  ));
+  assert.equal(result.counts.conflict, 0);
+  assert.equal(result.counts.suppressed, 1);
+  const f = result.findings.suppressed[0];
+  assert.equal(f.depth, 0);
+  assert.equal(f.priority, 5);
+  assert.equal(f.winner.id, 'high');
+  assert.deepEqual(f.suppressed.map((r) => r.id), ['low']);
+  assert.equal(f.suppressed[0].priority, 1);
+  // 低优先级规则被抑制：{x:1} 不可达，只有 {x:2} 成为后继并死锁
+  assert.equal(result.counts.deadlock, 1);
+  assert.deepEqual(result.findings.deadlock[0].state, { x: 2 });
+  assert.equal(result.stats.statesExplored, 2);
+});
+
+test('优先级：最高优先级并列仍报冲突，低优先级规则列入 suppressed', () => {
+  const result = run(base(
+    [intVar('x', 0, 10)],
+    { x: 0 },
+    [
+      { id: 'a', name: 'A', priority: 5, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'b', name: 'B', priority: 5, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 2)] },
+      { id: 'c', name: 'C', priority: 1, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 3)] },
+    ],
+  ));
+  assert.equal(result.counts.conflict, 1);
+  assert.equal(result.counts.suppressed, 0);
+  const f = result.findings.conflict[0];
+  assert.equal(f.priority, 5);
+  assert.deepEqual(f.ruleIds.slice().sort(), ['a', 'b']);
+  assert.deepEqual(f.effective.map((r) => r.id).sort(), ['a', 'b']);
+  assert.deepEqual(f.suppressed.map((r) => r.id), ['c']);
+  assert.equal(f.suppressed[0].priority, 1);
+  // 被抑制的 c 不产生转移：{x:3} 不可达；并列的 a、b 各自转移后死锁
+  assert.equal(result.counts.deadlock, 2);
+  assert.equal(result.stats.statesExplored, 3);
+});
+
+test('优先级：抑制是正常裁决结果，不影响安全判定', () => {
+  const result = run(base(
+    [intVar('x', 0, 1)],
+    { x: 0 },
+    [
+      { id: 'low', name: '低', priority: 0, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'high', name: '高', priority: 9, condition: leaf('x', '==', 0), assignments: [assign('x', 'set', 1)] },
+      { id: 'back', name: '回', condition: leaf('x', '==', 1), assignments: [assign('x', 'set', 0)] },
+    ],
+  ));
+  assert.equal(result.counts.suppressed, 1);
+  assert.equal(result.counts.conflict, 0);
+  assert.equal(result.verdict, 'safe');
+  assert.equal(result.complete, true);
+});
+
+test('优先级：被抑制规则的越界赋值不判定为非法转移', () => {
+  const result = run(base(
+    [intVar('x', 0, 5)],
+    { x: 4 },
+    [
+      { id: 'boom', name: '越界但被抑制', priority: 0, condition: leaf('x', '==', 4), assignments: [assign('x', 'add', 4)] },
+      { id: 'ok', name: '合法且优先', priority: 1, condition: leaf('x', '==', 4), assignments: [assign('x', 'set', 0)] },
+    ],
+  ));
+  // boom 被抑制不参与转移，其越界赋值不计入非法转移
+  assert.equal(result.counts.invalidTransition, 0);
+  assert.equal(result.counts.suppressed, 1);
+  assert.equal(result.findings.suppressed[0].winner.id, 'ok');
+});
+
+test('优先级：缺省 priority 为 0，旧规则集行为不变（全部并列即冲突）', () => {
+  const { data, errors } = validateInput(base(
+    [intVar('x')],
+    { x: 0 },
+    [{ id: 'r', name: 'r', condition: null, assignments: [] }],
+  ));
+  assert.deepEqual(errors, []);
+  assert.equal(data.rules[0].priority, 0);
+
+  // 两条无 priority 的规则同时命中 -> 与引入优先级前一样报冲突
+  const result = run(base(
+    [intVar('x')],
+    { x: 0 },
+    [
+      { id: 'a', name: 'A', condition: null, assignments: [assign('x', 'set', 1)] },
+      { id: 'b', name: 'B', condition: null, assignments: [assign('x', 'set', 2)] },
+    ],
+  ));
+  assert.equal(result.counts.conflict >= 1, true);
+  assert.equal(result.counts.suppressed, 0);
+  assert.equal(result.findings.conflict[0].suppressed.length, 0);
+});
+
+test('校验：非法 priority 被拒绝，合法值原样保留', () => {
+  const mk = (priority) => base(
+    [intVar('x')],
+    { x: 0 },
+    [{ id: 'r', name: 'r', priority, condition: null, assignments: [] }],
+  );
+  for (const bad of [1.5, '2', NaN, Infinity, {}, [], true, 1_000_001, -1_000_001]) {
+    const { data, errors } = validateInput(mk(bad));
+    assert.equal(data, null);
+    assert.ok(errors.some((e) => /priority/.test(e)), `priority=${String(bad)} 应被拒绝`);
+  }
+  for (const good of [0, 3, -7, 1_000_000, -1_000_000]) {
+    const { data, errors } = validateInput(mk(good));
+    assert.deepEqual(errors, []);
+    assert.equal(data.rules[0].priority, good);
+  }
+  // null / undefined 视为未设置，回退默认 0
+  for (const unset of [null, undefined]) {
+    const { data, errors } = validateInput(mk(unset));
+    assert.deepEqual(errors, []);
+    assert.equal(data.rules[0].priority, 0);
+  }
+});
